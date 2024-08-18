@@ -326,6 +326,7 @@ func TestDuration(t *testing.T) {
 // Test Cases to be implemented
 // - Remove any positions
 // - Remove first and last position
+// - See if removes can be done with pop (safer)
 // - GetOrAdd
 // - Pop Order Assert
 // - Add same ID (check len)

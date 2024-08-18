@@ -61,20 +61,26 @@ Tests were performed in the environment below:
 ```go
 import "path/to/util"
 
-cache := util.NewHeapedCache( 1000000 )  // Cache with 1 million items
+type Person struct {
+    Id     int
+    Name   string
+    Phone  string
+}
+
+cache := util.NewHeapedCache[Person]( 1000000 )  // Cache with 1 million items
 ```
 
 ### 2. Adding Items to the Cache
 
 ```go
-obj := &MyType{/* ... */}
-cache.Push("item-id", obj)
+obj := &Person{/* ... */}
+cache.Push(obj.Id, obj)
 ```
 
 ### 3. Retrieving Items from the Cache
 
 ```go
-obj := cache.Get("item-id")
+obj := cache.Get(itemId)
 if obj != nil {
     // Use the cached object
 }
@@ -85,16 +91,16 @@ if obj != nil {
 If the item is not found in the cache, `GetOrPush` can be used to fetch or create it:
 
 ```go
-obj := cache.GetOrPush("item-id", func(id any) *MyType {
+obj := cache.GetOrPush(itemId, func(id any) *Person {
     // Logic to load/create the item if it's not in the cache
-    return &MyType{/* ... */}
+    return &Person{/* ... */}
 })
 ```
 
 ### 5. Removing Items from the Cache (Invalidation)
 
 ```go
-removed := cache.Remove("item-id")
+removed := cache.Remove(itemId)
 if removed {
     // Item was successfully removed
 }

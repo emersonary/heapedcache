@@ -176,9 +176,9 @@ func (t *HeapedCache[T]) Remove(id any) bool {
 
         // removes item from the slice
         t.sliceItems.Swap(findItem.index, len(t.sliceItems)-1)
-        t.sliceItems[len(t.sliceItems)-1] = nil // avoid memory leaks
-        t.sliceItems = t.sliceItems[:len(t.sliceItems)-1]
+        t.sliceItems[len(t.sliceItems)-1] = nil // don't stop the GC from reclaiming the item eventually
         heap.Fix(&t.sliceItems, findItem.index)
+        t.sliceItems = t.sliceItems[:len(t.sliceItems)-1]
 
         // remove item from the map
         delete(t.mapItems, id)
@@ -231,7 +231,8 @@ func (h *HeapedCacheItems[T]) Pop() any {
 
     n := len(*h)
     item := (*h)[n-1]
-    (*h)[n-1] = nil // avoid memory leak
+    (*h)[n-1] = nil // don't stop the GC from reclaiming the item eventually
+    item.index = -1 // for safety
     *h = (*h)[0 : n-1]
 
     return item
