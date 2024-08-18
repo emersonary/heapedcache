@@ -115,7 +115,7 @@ size := cache.Len()
 ## API Reference
 
 ---
-### `NewHeapedCache(maxRows int) *HeapedCache[T]`
+### `NewHeapedCache[T any](maxRows int) *HeapedCache[T]`
 Creates a new `HeapedCache` with a fixed maximum size.
 
 ### `Push(id any, item *T) *T`
