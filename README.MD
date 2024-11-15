@@ -1,3 +1,4 @@
+
 # HeapedCache
 
 `HeapedCache` is a generic, extremely fast, thread-safe in-memory cache for Go that maintains a fixed size by automatically removing the least recently accessed items when the cache limit is reached. This package leverages a min-heap to efficiently manage cache eviction based on item age.
@@ -11,7 +12,7 @@
   <br><br>
 - **Thread-Safe**: The cache is safe for concurrent use by multiple goroutines, thanks to internal mutex locks that manage concurrent read/write operations.
   <br><br>
-- **Generic**: Implemented using Go's type parameters (`[T any]`), the cache can store any type of object, providing flexibility and type safety.
+- **Generic**: Implemented using Go's type parameters (`[TId any, TObj any]`), the cache can store any type of object, providing flexibility and type safety.
   <br><br>
 - **Automatic Eviction**: When the cache reaches its maximum capacity, items with the oldest timestamps are automatically evicted to make room for new entries. Note that the items in the slice are not kept in a sorted order in memory to avoid additional overhead.
   <br><br>
@@ -19,11 +20,10 @@
   <br><br>
 - **Efficient Searching**: The structure provides rapid access to items through unique IDs, leveraging the efficiency of the underlying hash map.
 
-
 ## Memory allocation
 
 ---
-In a 64 bit application, it consumes 16 bytes per item. That means that if you store 1 million items, it allocates 16 MB, represented by a list of pointers to the desired structure, whose (unknown) allocated memory is not referenced on this estimation.  
+In a 64-bit application, it consumes 16 bytes per item. That means that if you store 1 million items, it allocates 16 MB, represented by a list of pointers to the desired structure, whose (unknown) allocated memory is not referenced in this estimation.
 
 ## Known use cases (so far)
 
@@ -41,16 +41,16 @@ Tests were performed in the environment below:
 - 16GB RAM
 - OS: Windows
 
-#### 1. Creation of 1 million items (200 bytes struct) on an 1 million capacity heaped cache: 
- 
-- average of 700 nanoseconds per item on creation, 90 nanoseconds on reading
-- 60% of creation duration were related to the memory allocation of the item itself. 
+#### 1. Creation of 1 million items (200 bytes struct) on a 1 million capacity heaped cache:
+
+- Average of 700 nanoseconds per item on creation, 90 nanoseconds on reading.
+- 60% of creation duration was related to the memory allocation of the item itself.
 - So storing duration constituted an average of 280 nanoseconds.
 
-#### 2. Creation of 1 million items (200 bytes struct) on an 100 thousand capacity heaped cache:
+#### 2. Creation of 1 million items (200 bytes struct) on a 100 thousand capacity heaped cache:
 
-- average of 650 nanoseconds per item on creation, 30 nanoseconds on reading
-- 60% of creation duration were related to the memory allocation of the item itself.
+- Average of 650 nanoseconds per item on creation, 30 nanoseconds on reading.
+- 60% of creation duration was related to the memory allocation of the item itself.
 - So storing duration constituted an average of 260 nanoseconds.
 
 ---
@@ -67,7 +67,7 @@ type Person struct {
     Phone  string
 }
 
-cache := util.NewHeapedCache[Person]( 1000000 )  // Cache with 1 million items
+cache := util.NewHeapedCache[int, Person](1000000)  // Cache with 1 million items
 ```
 
 ### 2. Adding Items to the Cache
@@ -88,10 +88,10 @@ if obj != nil {
 
 ### 4. Fetching or Adding Items with a Loading Function
 
-If the item is not found in the cache, `GetOrPush` can be used to fetch or create it:
+If the item is not found in the cache, `GetOrAdd` can be used to fetch or create it:
 
 ```go
-obj := cache.GetOrPush(itemId, func(id any) *Person {
+obj := cache.GetOrAdd(itemId, func(id int) *Person {
     // Logic to load/create the item if it's not in the cache
     return &Person{/* ... */}
 })
@@ -115,19 +115,25 @@ size := cache.Len()
 ## API Reference
 
 ---
-### `NewHeapedCache[T any](maxRows int) *HeapedCache[T]`
+### `NewHeapedCache[TId any, TObj any](maxRows int) *HeapedCache[TId, TObj]`
 Creates a new `HeapedCache` with a fixed maximum size.
 
-### `Push(id any, item *T) *T`
+### `Push(id TId, item *TObj) *TObj`
 Adds an item to the cache or updates it if it already exists. If the cache is full, the oldest item is evicted.
 
-### `Get(id any) *T`
+### `Pop() *TObj`
+Removes and returns the oldest cached item.
+
+### `PopWithRefreshed() (*TObj, time.Time)`
+Removes and returns the oldest cached item along with its last refreshed timestamp.
+
+### `Get(id TId) *TObj`
 Retrieves an item from the cache by its ID. Returns `nil` if the item is not found.
 
-### `GetOrPush(id any, fn func(id any) *T) *T`
+### `GetOrAdd(id TId, fn func(id TId) *TObj) *TObj`
 Retrieves an item from the cache by its ID. If the item does not exist, the provided function `fn` is called to create it, and the new item is added to the cache.
 
-### `Remove(id any) bool`
+### `Remove(id TId) bool`
 Removes an item from the cache by its ID. Returns `true` if the item was successfully removed.
 
 ### `Len() int`

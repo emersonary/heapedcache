@@ -1,240 +1,255 @@
-package util
+package utils
 
 import (
-    "container/heap"
-    "sync"
-    "time"
+	"container/heap"
+	"sync"
+	"time"
 )
 
 // struct to represent the cached item
-type HeapedCacheItem[T any] struct {
-    Id        any
-    index     int
-    Refreshed time.Time
-    obj       *T
+type HeapedCacheItem[TId any, TObj any] struct {
+	Id        TId
+	index     int
+	Refreshed time.Time
+	obj       *TObj
 }
 
 // this type wraps the array of HeapedCacheItem
 // in order to define methods
-type HeapedCacheItems[T any] []*HeapedCacheItem[T]
+type HeapedCacheItems[TId any, TObj any] []*HeapedCacheItem[TId, TObj]
 
 // type that represents the cache
-type HeapedCache[T any] struct {
-    mu         sync.Mutex
-    maxRows    int
-    mapItems   map[any]*HeapedCacheItem[T]
-    sliceItems HeapedCacheItems[T]
+type HeapedCache[TId any, TObj any] struct {
+	mu         sync.RWMutex
+	maxRows    int
+	mapItems   map[any]*HeapedCacheItem[TId, TObj]
+	sliceItems HeapedCacheItems[TId, TObj]
 }
 
 // conctructor of the HeapedCache
 // this cache is meant to have a fixed sized in memory.
 // The higher the data volume, the lower the range of the cache
-func NewHeapedCache[T any](maxRows int) *HeapedCache[T] {
+func NewHeapedCache[TId any, TObj any](maxRows int) *HeapedCache[TId, TObj] {
 
-    tolerance := 5
-
-    return &HeapedCache[T]{
-        maxRows:    maxRows,
-        mapItems:   make(map[any]*HeapedCacheItem[T], maxRows+tolerance),
-        sliceItems: make(HeapedCacheItems[T], 0, maxRows+tolerance),
-    }
+	return &HeapedCache[TId, TObj]{
+		maxRows:    maxRows,
+		mapItems:   make(map[any]*HeapedCacheItem[TId, TObj], maxRows+1),
+		sliceItems: make(HeapedCacheItems[TId, TObj], 0, maxRows+1),
+	}
 
 }
 
 // removes the oldest cached item from the list (private)
-func (t *HeapedCache[T]) pop() *T {
+func (t *HeapedCache[Tid, TObj]) pop() *TObj {
 
-    item := heap.Pop(&t.sliceItems).(*HeapedCacheItem[T])
-    delete(t.mapItems, item.Id)
-    return item.obj
+	item := heap.Pop(&t.sliceItems).(*HeapedCacheItem[Tid, TObj])
+	delete(t.mapItems, item.Id)
+	return item.obj
 
 }
 
 // removes the oldest cached item from the list (public)
-func (t *HeapedCache[T]) Pop() *T {
+func (t *HeapedCache[TId, TObj]) Pop() *TObj {
 
-    t.mu.Lock()
-    defer t.mu.Unlock()
+	t.mu.Lock()
+	defer t.mu.Unlock()
 
-    return t.pop()
+	return t.pop()
+
+}
+
+func (t *HeapedCache[TId, TObj]) PopWithRefreshed() (*TObj, time.Time) {
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	return t.popWithRefreshed()
+
+}
+
+func (t *HeapedCache[Tid, TObj]) popWithRefreshed() (*TObj, time.Time) {
+
+	item := heap.Pop(&t.sliceItems).(*HeapedCacheItem[Tid, TObj])
+	delete(t.mapItems, item.Id)
+	return item.obj, item.Refreshed
 
 }
 
 // returns the cached item of a given id
 // returns nil if it does not exist
-func (t *HeapedCache[T]) Get(id any) *T {
+func (t *HeapedCache[Tid, TObj]) Get(id any) *TObj {
 
-    t.mu.Lock()
-    defer t.mu.Unlock()
+	t.mu.Lock()
+	defer t.mu.Unlock()
 
-    item := t.mapItems[id]
+	item := t.mapItems[id]
 
-    if item == nil {
-        return nil
-    }
+	if item == nil {
+		return nil
+	}
 
-    return item.obj
+	return item.obj
 
 }
 
 // returns the cached item of a given id
 // if it does not exist, fn is executed and returned in the function
 // while the new item is placed on the cache
-func (t *HeapedCache[T]) GetOrPush(id any, fn func(id any) *T) *T {
+func (t *HeapedCache[TId, TObj]) GetOrAdd(id TId, fn func(id TId) *TObj) *TObj {
 
-    t.mu.Lock()
-    defer t.mu.Unlock()
+	t.mu.Lock()
+	defer t.mu.Unlock()
 
-    findItem := t.mapItems[id]
+	findItem := t.mapItems[id]
 
-    if findItem == nil {
+	if findItem == nil {
 
-        result := fn(id)
+		result := fn(id)
 
-        if result == nil {
-            return nil
-        }
+		if result == nil {
+			return nil
+		}
 
-        return t.push(id, result)
+		return t.push(id, result)
 
-    } else {
+	} else {
 
-        return findItem.obj
+		return findItem.obj
 
-    }
-
-}
-
-func (t *HeapedCache[T]) Len() int {
-
-    t.mu.Lock()
-    defer t.mu.Unlock()
-
-    return len(t.mapItems)
+	}
 
 }
 
-// Adds new item to the cache when it does not exist (public)
-// Updates the item when it does exist
-func (t *HeapedCache[T]) push(id any, item *T) *T {
+func (t *HeapedCache[TId, TObj]) Len() int {
 
-    if item == nil {
-        return nil
-    }
+	t.mu.Lock()
+	defer t.mu.Unlock()
 
-    findItem := t.mapItems[id]
-
-    if findItem == nil {
-
-        newItem := &HeapedCacheItem[T]{
-            Id:        id,
-            index:     len(t.sliceItems),
-            Refreshed: time.Now(),
-            obj:       item,
-        }
-
-        t.mapItems[id] = newItem
-
-        heap.Push(&t.sliceItems, newItem)
-
-        if len(t.sliceItems) > t.maxRows {
-            t.pop()
-        }
-
-    } else {
-
-        findItem.obj = item
-        findItem.Refreshed = time.Now()
-        heap.Fix(&t.sliceItems, findItem.index)
-
-    }
-
-    return item
+	return len(t.mapItems)
 
 }
 
 // Adds new item to the cache when it does not exist (public)
 // Updates the item when it does exist
-func (t *HeapedCache[T]) Push(id any, item *T) *T {
+func (t *HeapedCache[TId, TObj]) push(id TId, item *TObj) *TObj {
 
-    t.mu.Lock()
-    defer t.mu.Unlock()
+	if item == nil {
+		return nil
+	}
 
-    return t.push(id, item)
+	findItem := t.mapItems[id]
+
+	if findItem == nil {
+
+		newItem := &HeapedCacheItem[TId, TObj]{
+			Id:        id,
+			index:     len(t.sliceItems),
+			Refreshed: time.Now(),
+			obj:       item,
+		}
+
+		t.mapItems[id] = newItem
+
+		heap.Push(&t.sliceItems, newItem)
+
+		if len(t.sliceItems) > t.maxRows {
+			t.pop()
+		}
+
+	} else {
+
+		findItem.obj = item
+		findItem.Refreshed = time.Now()
+		heap.Fix(&t.sliceItems, findItem.index)
+
+	}
+
+	return item
+
+}
+
+// Adds new item to the cache when it does not exist (public)
+// Updates the item when it does exist
+func (t *HeapedCache[TId, TObj]) Push(id TId, item *TObj) *TObj {
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	return t.push(id, item)
 
 }
 
 // Remove items from the list (cache invalidation)
-func (t *HeapedCache[T]) Remove(id any) bool {
+func (t *HeapedCache[TId, TObj]) Remove(id TId) bool {
 
-    t.mu.Lock()
-    defer t.mu.Unlock()
+	t.mu.Lock()
+	defer t.mu.Unlock()
 
-    findItem := t.mapItems[id]
+	findItem := t.mapItems[id]
 
-    if findItem != nil {
+	if findItem != nil {
 
-        // removes item from the slice
-        t.sliceItems.Swap(findItem.index, len(t.sliceItems)-1)
-        t.sliceItems[len(t.sliceItems)-1] = nil // don't stop the GC from reclaiming the item eventually
-        heap.Fix(&t.sliceItems, findItem.index)
-        t.sliceItems = t.sliceItems[:len(t.sliceItems)-1]
+		// removes item from the slice
+		t.sliceItems.Swap(findItem.index, len(t.sliceItems)-1)
+		t.sliceItems[len(t.sliceItems)-1] = nil // don't stop the GC from reclaiming the item eventually
+		heap.Fix(&t.sliceItems, findItem.index)
+		t.sliceItems = t.sliceItems[:len(t.sliceItems)-1]
 
-        // remove item from the map
-        delete(t.mapItems, id)
+		// remove item from the map
+		delete(t.mapItems, id)
 
-        return true
+		return true
 
-    }
+	}
 
-    return false
+	return false
 
 }
 
 // returns the size of the cache in lines
-func (h *HeapedCacheItems[T]) Len() int {
+func (h *HeapedCacheItems[TId, TObj]) Len() int {
 
-    return len(*h)
+	return len(*h)
 
 }
 
 // returns true if the cached item from the second index is smaller than the first one
-func (h *HeapedCacheItems[T]) Less(i int, j int) bool {
+func (h *HeapedCacheItems[TId, TObj]) Less(i int, j int) bool {
 
-    return (*h)[i].Refreshed.Compare((*h)[j].Refreshed) < 0
+	return (*h)[i].Refreshed.Compare((*h)[j].Refreshed) < 0
 
 }
 
 // swaps items of given indexes
-func (h *HeapedCacheItems[T]) Swap(i int, j int) {
+func (h *HeapedCacheItems[TId, TObj]) Swap(i int, j int) {
 
-    if i != j {
+	if i != j {
 
-        (*h)[i], (*h)[j] = (*h)[j], (*h)[i]
+		(*h)[i], (*h)[j] = (*h)[j], (*h)[i]
 
-        (*h)[i].index = i
-        (*h)[j].index = j
+		(*h)[i].index = i
+		(*h)[j].index = j
 
-    }
+	}
 
 }
 
 // Adds item in the cache
-func (h *HeapedCacheItems[T]) Push(x any) {
+func (h *HeapedCacheItems[TId, TObj]) Push(x any) {
 
-    *h = append(*h, x.(*HeapedCacheItem[T]))
+	*h = append(*h, x.(*HeapedCacheItem[TId, TObj]))
 
 }
 
 // Removes last item (older) from the cache and returns it
-func (h *HeapedCacheItems[T]) Pop() any {
+func (h *HeapedCacheItems[TId, TObj]) Pop() any {
 
-    n := len(*h)
-    item := (*h)[n-1]
-    (*h)[n-1] = nil // don't stop the GC from reclaiming the item eventually
-    item.index = -1 // for safety
-    *h = (*h)[0 : n-1]
+	n := len(*h)
+	item := (*h)[n-1]
+	(*h)[n-1] = nil // don't stop the GC from reclaiming the item eventually
+	item.index = -1 // for safety
+	*h = (*h)[0 : n-1]
 
-    return item
+	return item
 
 }

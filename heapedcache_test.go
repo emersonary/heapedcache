@@ -1,7 +1,8 @@
-package util
+package utils
 
 import (
-    "github.com/stretchr/testify/assert"
+    "fmt"
+    "github.com/stretchr/testify/require"
     "math"
     "strconv"
     "sync"
@@ -14,6 +15,20 @@ type AccountTest struct {
     Name   string
     Phone  string
     Filler [200]rune
+}
+
+func (a *AccountTest) Validate() error {
+
+    if a.Name != "EMERSON "+strconv.Itoa(a.Id) {
+        return fmt.Errorf("Invalid Name %s from Id %d ", a.Name, a.Id)
+    }
+
+    if a.Phone != "PHONE "+strconv.Itoa(a.Id) {
+        return fmt.Errorf("Invalid Phone %s from Id %d ", a.Phone, a.Id)
+    }
+
+    return nil
+
 }
 
 func NewAccountTest(id int) *AccountTest {
@@ -31,7 +46,7 @@ func TestCachedHeapLen(t *testing.T) {
 
     t.Log("validating TestCachedHeapLen")
 
-    heapedCache := NewHeapedCache[AccountTest](10)
+    heapedCache := NewHeapedCache[int, AccountTest](10)
 
     for i := range 9 {
 
@@ -39,7 +54,7 @@ func TestCachedHeapLen(t *testing.T) {
 
     }
 
-    assert.Equal(t, 9, heapedCache.Len())
+    require.Equal(t, 9, heapedCache.Len())
 
 }
 
@@ -47,7 +62,7 @@ func TestCachedHeapLenOverFlow(t *testing.T) {
 
     t.Log("validating TestCachedHeapLenOverFlow")
 
-    heapedCache := NewHeapedCache[AccountTest](10)
+    heapedCache := NewHeapedCache[int, AccountTest](10)
 
     for i := range 20 {
 
@@ -55,7 +70,7 @@ func TestCachedHeapLenOverFlow(t *testing.T) {
 
     }
 
-    assert.Equal(t, 10, heapedCache.Len())
+    require.Equal(t, 10, heapedCache.Len())
 
 }
 
@@ -63,7 +78,7 @@ func TestCachedHeapGet(t *testing.T) {
 
     t.Log("validating TestCachedHeapGet")
 
-    heapedCache := NewHeapedCache[AccountTest](10)
+    heapedCache := NewHeapedCache[int, AccountTest](10)
 
     for i := range 9 {
 
@@ -73,9 +88,9 @@ func TestCachedHeapGet(t *testing.T) {
 
     for i := range 9 {
 
-        assert.Equal(t, i, heapedCache.Get(i).Id)
-        assert.Equal(t, "EMERSON "+strconv.Itoa(i), heapedCache.Get(i).Name)
-        assert.Equal(t, "PHONE "+strconv.Itoa(i), heapedCache.Get(i).Phone)
+        require.Equal(t, i, heapedCache.Get(i).Id)
+        require.Equal(t, "EMERSON "+strconv.Itoa(i), heapedCache.Get(i).Name)
+        require.Equal(t, "PHONE "+strconv.Itoa(i), heapedCache.Get(i).Phone)
 
     }
 
@@ -85,7 +100,7 @@ func TestCachedHeap1Million(t *testing.T) {
 
     t.Log("validating TestCachedHeap1Million")
 
-    heapedCache := NewHeapedCache[AccountTest](1000000)
+    heapedCache := NewHeapedCache[int, AccountTest](1000000)
 
     now1 := time.Now()
 
@@ -121,7 +136,7 @@ func TestCachedHeap1MillionWithOverFlow(t *testing.T) {
 
     t.Log("validating TestCachedHeap1Million")
 
-    heapedCache := NewHeapedCache[AccountTest](10000)
+    heapedCache := NewHeapedCache[int, AccountTest](10000)
 
     now1 := time.Now()
 
@@ -163,7 +178,7 @@ func TestCachedHeap1MillionWithOverFlow(t *testing.T) {
 
     t.Log("max = " + strconv.Itoa(max) + " min = " + strconv.Itoa(min) + " count = " + strconv.Itoa(count))
 
-    assert.Equal(t, 10000, count)
+    require.Equal(t, 10000, count)
 
     duration = time.Since(now2)
 
@@ -175,7 +190,7 @@ func TestCachedHeap1MillionMultiThread(t *testing.T) {
 
     t.Log("validating TestCachedHeap1MillionMultiThread")
 
-    heapedCache := NewHeapedCache[AccountTest](1000000)
+    heapedCache := NewHeapedCache[int, AccountTest](1000000)
 
     now1 := time.Now()
 
@@ -191,7 +206,7 @@ func TestCachedHeap1MillionMultiThread(t *testing.T) {
 
                 id := i*10 + j
 
-                heapedCache.Push(id, NewAccountTest(i))
+                heapedCache.GetOrAdd(id, func(id int) *AccountTest { return NewAccountTest(i) })
 
             }
 
@@ -207,11 +222,14 @@ func TestCachedHeap1MillionMultiThread(t *testing.T) {
 
     t.Log("time to create 1 million records: " + strconv.Itoa(int(duration.Milliseconds())) + " milliseconds (" + strconv.Itoa(int(duration.Nanoseconds())/1000000) + " nanoseconds per item)")
 
-    assert.Equal(t, 1000000, heapedCache.Len())
+    require.Equal(t, 1000000, heapedCache.Len())
 
     now2 := time.Now()
 
     wg.Add(10)
+
+    var oldRefreshed time.Time
+    var maxDuration time.Duration
 
     for range 10 {
 
@@ -219,7 +237,25 @@ func TestCachedHeap1MillionMultiThread(t *testing.T) {
 
             for range 100000 {
 
-                heapedCache.Pop()
+                accountTest, refreshed := heapedCache.PopWithRefreshed()
+
+                err := accountTest.Validate()
+                require.NoError(t, err)
+
+                if !oldRefreshed.IsZero() {
+
+                    if refreshed.Before(oldRefreshed) {
+
+                        duration2 := oldRefreshed.Sub(refreshed)
+
+                        if duration2 > maxDuration {
+                            maxDuration = duration2
+                        }
+
+                    }
+                }
+
+                oldRefreshed = refreshed
 
             }
 
@@ -230,26 +266,27 @@ func TestCachedHeap1MillionMultiThread(t *testing.T) {
     }
 
     wg.Wait()
+    t.Log("Max Delay: " + strconv.Itoa(int(maxDuration.Microseconds())) + " microseconds")
 
     duration = time.Since(now2)
 
     t.Log("time to pop 1 million records: " + strconv.Itoa(int(duration.Milliseconds())) + " milliseconds (" + strconv.Itoa(int(duration.Nanoseconds())/1000000) + " nanoseconds per item)")
 
-    assert.Equal(t, 0, heapedCache.Len())
+    require.Equal(t, 0, heapedCache.Len())
 
 }
 
-func TestCachedHeap1MillionGetOrPush(t *testing.T) {
+func TestCachedHeap1MillionGetOrAdd(t *testing.T) {
 
-    t.Log("validating TestCachedHeap1MillionGetOrPush")
+    t.Log("validating TestCachedHeap1MillionGetOrAdd")
 
-    heapedCache := NewHeapedCache[AccountTest](1000000)
+    heapedCache := NewHeapedCache[int, AccountTest](1000000)
 
     now1 := time.Now()
 
-    fn := func(id any) *AccountTest {
+    fn := func(id int) *AccountTest {
 
-        i := id.(int)
+        i := id
 
         if i == 0 {
             return nil
@@ -260,7 +297,7 @@ func TestCachedHeap1MillionGetOrPush(t *testing.T) {
 
     for i := range 1000000 {
 
-        heapedCache.GetOrPush(i, fn)
+        heapedCache.GetOrAdd(i, fn)
 
     }
 
@@ -268,13 +305,13 @@ func TestCachedHeap1MillionGetOrPush(t *testing.T) {
 
     t.Log("time to create 1 million records: " + strconv.Itoa(int(duration.Milliseconds())) + " milliseconds (" + strconv.Itoa(int(duration.Nanoseconds())/1000000) + " nanoseconds per item)")
 
-    assert.Equal(t, 999999, heapedCache.Len())
+    require.Equal(t, 999999, heapedCache.Len())
 
     now2 := time.Now()
 
     for i := range 1000000 {
 
-        heapedCache.GetOrPush(i, fn)
+        heapedCache.GetOrAdd(i, fn)
 
     }
 
@@ -282,7 +319,7 @@ func TestCachedHeap1MillionGetOrPush(t *testing.T) {
 
     t.Log("time to read 1 million records: " + strconv.Itoa(int(duration.Milliseconds())) + " milliseconds (" + strconv.Itoa(int(duration.Nanoseconds())/1000000) + " nanoseconds per item)")
 
-    assert.Equal(t, 999999, heapedCache.Len())
+    require.Equal(t, 999999, heapedCache.Len())
 
 }
 
@@ -290,7 +327,7 @@ func TestDuration(t *testing.T) {
 
     t.Log("validating TestDuration")
 
-    heapedCache := NewHeapedCache[AccountTest](1000000)
+    heapedCache := NewHeapedCache[int, AccountTest](1000000)
 
     now1 := time.Now()
 
@@ -327,7 +364,6 @@ func TestDuration(t *testing.T) {
 // - Remove any positions
 // - Remove first and last position
 // - See if removes can be done with pop (safer)
-// - GetOrAdd
 // - Pop Order Assert
 // - Add same ID (check len)
 // - compare slice len to map len
